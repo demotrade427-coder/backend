@@ -112,9 +112,10 @@ export const adminLogin = async (req, res) => {
 
 export const getMe = async (req, res) => {
   try {
+    const userId = req.user?.id || req.user.id;
     const users = await query(
-      'SELECT id, first_name, last_name, email, phone, country, balance, total_invested, total_profit, kyc_status, created_at FROM users WHERE id = ?',
-      [req.user.id]
+      'SELECT id, first_name, last_name, email, phone, country, balance, total_deposited, total_withdrawn, total_traded, total_profit, kyc_status, created_at FROM users WHERE id = $1',
+      [userId]
     );
 
     if (!users.length) {
@@ -130,13 +131,15 @@ export const getMe = async (req, res) => {
       phone: user.phone,
       country: user.country,
       balance: user.balance,
-      totalInvested: user.total_invested,
+      totalDeposited: user.total_deposited,
+      totalWithdrawn: user.total_withdrawn,
+      totalTraded: user.total_traded,
       totalProfit: user.total_profit,
       kycStatus: user.kyc_status,
       createdAt: user.created_at
     });
   } catch (error) {
-    console.error(error);
+    console.error('getMe error:', error.message);
     res.status(500).json({ message: 'Server error' });
   }
 };

@@ -201,7 +201,7 @@ router.get('/my-trades/open', verifyUser, async (req, res) => {
     const trades = await query(`
       SELECT t.*, t.coin_name as coin_name, t.coin_symbol
       FROM trades t
-      WHERE t.user_id = ? AND t.result = "pending"
+      WHERE t.user_id = $1 AND t.result = 'pending'
       ORDER BY t.created_at DESC
     `, [req.user.id]);
     
@@ -222,7 +222,7 @@ router.get('/my-trades/history', verifyUser, async (req, res) => {
     const trades = await query(`
       SELECT t.*, t.coin_name as coin_name, t.coin_symbol
       FROM trades t
-      WHERE t.user_id = ? AND t.result != "pending"
+      WHERE t.user_id = $1 AND t.result != 'pending'
       ORDER BY t.created_at DESC
     `, [req.user.id]);
     

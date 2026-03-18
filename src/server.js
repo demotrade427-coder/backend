@@ -13,6 +13,7 @@ import tradingRoutes from './routes/tradingRoutes.js';
 import { initializeDatabase } from './config/database.js';
 import { startPriceUpdates, getAllPrices } from './services/priceService.js';
 import { startTradeSettlement } from './services/tradeSettlement.js';
+import { authenticate } from './middleware/auth.js';
 
 dotenv.config();
 

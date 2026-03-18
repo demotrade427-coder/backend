@@ -51,7 +51,7 @@ export const authenticateAdmin = async (req, res, next) => {
 
       req.admin = admin[0];
     } catch (dbError) {
-      if (dbError.code === 'ER_NO_SUCH_TABLE') {
+      if (dbError.code === '42P01') {
         return res.status(401).json({ message: 'Admin not configured' });
       }
       throw dbError;

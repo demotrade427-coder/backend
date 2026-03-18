@@ -1,30 +1,24 @@
-import { query, getConnection } from '../config/database.js';
+import { query } from '../config/database.js';
 
 export const createInvestment = async (req, res) => {
-  const connection = await getConnection();
   try {
-    await connection.beginTransaction();
-
     const { planId, amount } = req.body;
     const userId = req.user.id;
 
-    const plans = await connection.execute('SELECT * FROM plans WHERE id = ?', [planId]);
-    if (!plans[0].length) {
-      await connection.rollback();
+    const plans = await query('SELECT * FROM plans WHERE id = $1', [planId]);
+    if (!plans.length) {
       return res.status(404).json({ message: 'Plan not found' });
     }
 
-    const plan = plans[0][0];
+    const plan = plans[0];
     if (amount < plan.min_amount || amount > plan.max_amount) {
-      await connection.rollback();
       return res.status(400).json({ message: `Amount must be between $${plan.min_amount} and $${plan.max_amount}` });
     }
 
-    const users = await connection.execute('SELECT balance FROM users WHERE id = ?', [userId]);
-    const user = users[0][0];
+    const users = await query('SELECT balance FROM users WHERE id = $1', [userId]);
+    const user = users[0];
 
     if (user.balance < amount) {
-      await connection.rollback();
       return res.status(400).json({ message: 'Insufficient balance' });
     }
 
@@ -32,30 +26,20 @@ export const createInvestment = async (req, res) => {
     const endDate = new Date();
     endDate.setDate(endDate.getDate() + plan.duration_days);
 
-    await connection.execute(
-      'UPDATE users SET balance = balance - ?, total_invested = total_invested + ? WHERE id = ?',
-      [amount, amount, userId]
+    await query(
+      'UPDATE users SET balance = balance - $1, total_invested = total_invested + $1 WHERE id = $2',
+      [amount, userId]
     );
 
-    const [investmentResult] = await connection.execute(
-      'INSERT INTO investments (user_id, plan_id, amount, roi_percentage, expected_profit, end_date) VALUES (?, ?, ?, ?, ?, ?)',
-      [userId, planId, amount, plan.roi_percentage, expectedProfit, endDate]
+    const investmentResult = await query(
+      'INSERT INTO investments (user_id, plan_id, amount, roi_percentage, expected_profit, end_date, status) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      [userId, planId, amount, plan.roi_percentage, expectedProfit, endDate, 'active']
     );
-
-    await connection.execute(
-      'INSERT INTO transactions (user_id, type, amount, description, reference_id) VALUES (?, ?, ?, ?, ?)',
-      [userId, 'investment', amount, `Investment in ${plan.name}`, investmentResult.insertId]
-    );
-
-    await connection.commit();
 
     res.status(201).json({ message: 'Investment created successfully', investmentId: investmentResult.insertId });
   } catch (error) {
-    await connection.rollback();
     console.error(error);
     res.status(500).json({ message: 'Server error' });
-  } finally {
-    connection.release();
   }
 };
 
@@ -65,7 +49,7 @@ export const getMyInvestments = async (req, res) => {
       `SELECT i.*, p.name as plan_name, p.description as plan_description 
        FROM investments i 
        JOIN plans p ON i.plan_id = p.id 
-       WHERE i.user_id = ? 
+       WHERE i.user_id = $1 
        ORDER BY i.start_date DESC`,
       [req.user.id]
     );
@@ -86,7 +70,7 @@ export const getInvestmentStats = async (req, res) => {
         SUM(amount) as total_invested,
         SUM(actual_profit) as total_profit
       FROM investments 
-      WHERE user_id = ?`,
+      WHERE user_id = $1`,
       [req.user.id]
     );
     res.json(stats[0]);
@@ -113,37 +97,29 @@ export const getAllInvestmentsAdmin = async (req, res) => {
 };
 
 export const completeInvestment = async (investmentId) => {
-  const connection = await getConnection();
   try {
-    await connection.beginTransaction();
-
-    const [investments] = await connection.execute('SELECT * FROM investments WHERE id = ?', [investmentId]);
-    if (!investments[0].length || investments[0][0].status !== 'active') {
+    const investments = await query('SELECT * FROM investments WHERE id = $1', [investmentId]);
+    if (!investments.length || investments[0].status !== 'active') {
       return;
     }
 
-    const investment = investments[0][0];
+    const investment = investments[0];
 
-    await connection.execute(
-      'UPDATE users SET balance = balance + ?, total_profit = total_profit + ? WHERE id = ?',
-      [investment.expected_profit, investment.expected_profit, investment.user_id]
+    await query(
+      'UPDATE users SET balance = balance + $1, total_profit = total_profit + $1 WHERE id = $2',
+      [investment.expected_profit, investment.user_id]
     );
 
-    await connection.execute(
-      'UPDATE investments SET status = ?, actual_profit = ?, completed_at = NOW() WHERE id = ?',
+    await query(
+      'UPDATE investments SET status = $1, actual_profit = $2, completed_at = NOW() WHERE id = $3',
       ['completed', investment.expected_profit, investmentId]
     );
 
-    await connection.execute(
-      'INSERT INTO transactions (user_id, type, amount, description) VALUES (?, ?, ?, ?)',
+    await query(
+      'INSERT INTO transactions (user_id, type, amount, description) VALUES ($1, $2, $3, $4)',
       [investment.user_id, 'profit', investment.expected_profit, `Profit from investment #${investmentId}`]
     );
-
-    await connection.commit();
   } catch (error) {
-    await connection.rollback();
     console.error(error);
-  } finally {
-    connection.release();
   }
 };

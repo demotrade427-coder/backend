@@ -37,7 +37,7 @@ const verifyAdmin = async (req, res, next) => {
 
       req.admin = admin[0];
     } catch (dbError) {
-      if (dbError.code === 'ER_NO_SUCH_TABLE') {
+      if (dbError.code === '42P01') {
         return res.status(401).json({ error: 'Admin not configured' });
       }
       throw dbError;
@@ -103,12 +103,11 @@ router.post('/login', async (req, res) => {
 router.get('/dashboard-stats', verifyAdmin, async (req, res) => {
   try {
     const totalUsers = await query('SELECT COUNT(*) as count FROM users');
-    const totalDeposits = await query('SELECT COALESCE(SUM(amount), 0) as total FROM deposits WHERE status = "approved"');
-    const totalWithdrawals = await query('SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = "approved"');
+    const totalDeposits = await query("SELECT COALESCE(SUM(amount), 0) as total FROM deposits WHERE status = 'approved'");
+    const totalWithdrawals = await query("SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals WHERE status = 'approved'");
     const totalTrades = await query('SELECT COUNT(*) as count FROM trades');
-    const pendingDeposits = await query('SELECT COUNT(*) as count FROM deposits WHERE status = "pending"');
-    const pendingWithdrawals = await query('SELECT COUNT(*) as count FROM withdrawals WHERE status = "pending"');
-    const openTickets = await query('SELECT COUNT(*) as count FROM support_tickets');
+    const pendingDeposits = await query("SELECT COUNT(*) as count FROM deposits WHERE status = 'pending'");
+    const pendingWithdrawals = await query("SELECT COUNT(*) as count FROM withdrawals WHERE status = 'pending'");
     const totalVolume = await query('SELECT COALESCE(SUM(amount), 0) as total FROM trades');
 
     res.json({
@@ -118,7 +117,6 @@ router.get('/dashboard-stats', verifyAdmin, async (req, res) => {
       totalTrades: totalTrades[0]?.count || 0,
       pendingDeposits: pendingDeposits[0]?.count || 0,
       pendingWithdrawals: pendingWithdrawals[0]?.count || 0,
-      openTickets: openTickets[0]?.count || 0,
       totalVolume: Number(totalVolume[0]?.total || 0)
     });
   } catch (error) {
@@ -625,9 +623,9 @@ router.post('/markets', verifyAdmin, async (req, res) => {
     const { symbol, name, current_price, trade_duration_seconds, payout_rate, is_tradable } = req.body;
     
     const result = await query(
-      `INSERT INTO market_prices (symbol, name, current_price, trade_duration_seconds, payout_rate, is_tradable) VALUES (?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE name = ?, current_price = ?, trade_duration_seconds = ?, payout_rate = ?, is_tradable = ?`,
-      [symbol, name, current_price, trade_duration_seconds || 60, payout_rate || 85, is_tradable !== false, name, current_price, trade_duration_seconds || 60, payout_rate || 85, is_tradable !== false]
+      `INSERT INTO market_prices (symbol, name, current_price, trade_duration_seconds, payout_rate, is_tradable) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (symbol) DO UPDATE SET name = $2, current_price = $3, trade_duration_seconds = $4, payout_rate = $5, is_tradable = $6`,
+      [symbol, name, current_price, trade_duration_seconds || 60, payout_rate || 85, is_tradable !== false]
     );
     
     res.json({ message: 'Market updated', id: result.insertId });

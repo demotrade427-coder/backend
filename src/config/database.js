@@ -31,15 +31,19 @@ const formatPg = (sql, params) => {
 
 export const query = async (sql, params = []) => {
   try {
-    const isPg = !!pool.options.connectionString;
-    
     let finalSql = sql;
     let finalParams = params;
     
-    if (isPg && sql.includes('?')) {
-      const formatted = formatPg(sql, params);
-      finalSql = formatted.text;
-      finalParams = formatted.values;
+    const sqlUpper = sql.trim().toUpperCase();
+    
+    if (sql.includes('?')) {
+      let paramIndex = 1;
+      finalSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
+      finalParams = params;
+    }
+    
+    if (sqlUpper.startsWith('INSERT') && !sqlUpper.includes('RETURNING')) {
+      finalSql = finalSql + ' RETURNING id';
     }
     
     const res = await pool.query(finalSql, finalParams);
@@ -55,6 +59,8 @@ export const query = async (sql, params = []) => {
     }
   } catch (error) {
     console.error('Database query error:', error.message);
+    console.error('SQL:', sql);
+    console.error('Params:', params);
     throw error;
   }
 };
@@ -186,6 +192,136 @@ export const initializeDatabase = async () => {
         email VARCHAR(100) UNIQUE NOT NULL,
         password VARCHAR(255) NOT NULL,
         role VARCHAR(20) DEFAULT 'admin',
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS plans (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description TEXT,
+        min_amount DECIMAL(15, 2) NOT NULL,
+        max_amount DECIMAL(15, 2) NOT NULL,
+        roi_percentage DECIMAL(10, 2) NOT NULL,
+        duration_days INT NOT NULL,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS investments (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL REFERENCES users(id),
+        plan_id INT NOT NULL REFERENCES plans(id),
+        amount DECIMAL(15, 2) NOT NULL,
+        roi_percentage DECIMAL(10, 2) NOT NULL,
+        expected_profit DECIMAL(15, 2),
+        actual_profit DECIMAL(15, 2),
+        start_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        end_date TIMESTAMP,
+        completed_at TIMESTAMP,
+        status VARCHAR(20) DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS support_tickets (
+        id SERIAL PRIMARY KEY,
+        user_id INT REFERENCES users(id),
+        ticket_number VARCHAR(50) UNIQUE NOT NULL,
+        subject VARCHAR(200) NOT NULL,
+        category VARCHAR(50),
+        priority VARCHAR(20) DEFAULT 'medium',
+        status VARCHAR(20) DEFAULT 'open',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS support_messages (
+        id SERIAL PRIMARY KEY,
+        ticket_id INT NOT NULL REFERENCES support_tickets(id),
+        sender_id INT,
+        sender_type VARCHAR(20) NOT NULL,
+        message TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL REFERENCES users(id),
+        title VARCHAR(200) NOT NULL,
+        message TEXT,
+        type VARCHAR(50) DEFAULT 'info',
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bank_accounts (
+        id SERIAL PRIMARY KEY,
+        user_id INT REFERENCES users(id),
+        bank_name VARCHAR(100) NOT NULL,
+        account_name VARCHAR(100) NOT NULL,
+        account_number VARCHAR(50),
+        routing_number VARCHAR(50),
+        country VARCHAR(50) DEFAULT 'USA',
+        currency VARCHAR(10) DEFAULT 'USD',
+        is_crypto BOOLEAN DEFAULT FALSE,
+        wallet_type VARCHAR(50),
+        wallet_address VARCHAR(200),
+        network VARCHAR(50),
+        is_active BOOLEAN DEFAULT TRUE,
+        is_default BOOLEAN DEFAULT FALSE,
+        priority INT DEFAULT 0,
+        rotation_enabled BOOLEAN DEFAULT TRUE,
+        valid_from TIMESTAMP,
+        valid_until TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS crypto_wallets (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL REFERENCES users(id),
+        coin_type VARCHAR(50) NOT NULL,
+        wallet_address VARCHAR(200) NOT NULL,
+        network VARCHAR(50),
+        is_default BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS coins (
+        id SERIAL PRIMARY KEY,
+        coin_name VARCHAR(100) NOT NULL,
+        coin_symbol VARCHAR(20) NOT NULL,
+        coin_type VARCHAR(50),
+        current_price DECIMAL(15, 2),
+        previous_price DECIMAL(15, 2),
+        price_change_24h DECIMAL(15, 2) DEFAULT 0,
+        is_tradable BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS manual_results (
+        id SERIAL PRIMARY KEY,
+        trade_id INT NOT NULL REFERENCES trades(id),
+        admin_id INT REFERENCES admin_users(id),
+        result VARCHAR(20) NOT NULL,
+        note TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `).catch(() => {});
@@ -228,6 +364,20 @@ export const initializeDatabase = async () => {
           trade_duration_seconds = EXCLUDED.trade_duration_seconds,
           is_tradable = EXCLUDED.is_tradable
       `, [market.symbol, market.name, market.payout_rate, market.trade_duration_seconds]);
+    }
+
+    const defaultPlans = [
+      { name: 'Starter', description: 'Perfect for beginners', min_amount: 50, max_amount: 499, roi_percentage: 5, duration_days: 7 },
+      { name: 'Basic', description: 'Great for growing your investment', min_amount: 500, max_amount: 4999, roi_percentage: 10, duration_days: 14 },
+      { name: 'Premium', description: 'Maximum returns for serious investors', min_amount: 5000, max_amount: 50000, roi_percentage: 20, duration_days: 30 }
+    ];
+
+    for (const plan of defaultPlans) {
+      await pool.query(`
+        INSERT INTO plans (name, description, min_amount, max_amount, roi_percentage, duration_days, is_active)
+        VALUES ($1, $2, $3, $4, $5, $6, true)
+        ON CONFLICT DO NOTHING
+      `, [plan.name, plan.description, plan.min_amount, plan.max_amount, plan.roi_percentage, plan.duration_days]).catch(() => {});
     }
 
     console.log('✅ Database initialized successfully with PostgreSQL');

@@ -70,8 +70,8 @@ export const getTransactions = async (req, res) => {
 export const getAdminDashboard = async (req, res) => {
   try {
     const users = await query('SELECT COUNT(*) as total_users FROM users');
-    const deposits = await query('SELECT SUM(CASE WHEN status = "approved" THEN amount ELSE 0 END) as total_deposits FROM deposits');
-    const withdrawals = await query('SELECT SUM(CASE WHEN status = "approved" THEN amount ELSE 0 END) as total_withdrawals FROM withdrawals');
+    const deposits = await query("SELECT SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) as total_deposits FROM deposits");
+    const withdrawals = await query("SELECT SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) as total_withdrawals FROM withdrawals");
     const investments = await query('SELECT SUM(amount) as total_invested, COUNT(*) as total_investments FROM investments');
     const recentUsers = await query('SELECT * FROM users ORDER BY created_at DESC LIMIT 5');
     const recentDeposits = await query(

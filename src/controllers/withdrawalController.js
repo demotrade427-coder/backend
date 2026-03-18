@@ -1,57 +1,42 @@
-import { query, getConnection } from '../config/database.js';
+import { query } from '../config/database.js';
 
 export const createWithdrawal = async (req, res) => {
-  const connection = await getConnection();
   try {
-    await connection.beginTransaction();
-
     const { amount, walletAddress } = req.body;
     const userId = req.user.id;
 
-    const [users] = await connection.execute('SELECT balance FROM users WHERE id = ?', [userId]);
+    const users = await query('SELECT balance FROM users WHERE id = $1', [userId]);
     const user = users[0];
 
     if (user.balance < amount) {
-      await connection.rollback();
       return res.status(400).json({ message: 'Insufficient balance' });
     }
 
     if (amount < 50) {
-      await connection.rollback();
       return res.status(400).json({ message: 'Minimum withdrawal is $50' });
     }
 
-    await connection.execute(
-      'UPDATE users SET balance = balance - ? WHERE id = ?',
+    await query(
+      'UPDATE users SET balance = balance - $1 WHERE id = $2',
       [amount, userId]
     );
 
-    const [result] = await connection.execute(
-      'INSERT INTO withdrawals (user_id, amount, wallet_address) VALUES (?, ?, ?)',
-      [userId, amount, walletAddress]
+    const result = await query(
+      'INSERT INTO withdrawals (user_id, amount, wallet_address, status) VALUES ($1, $2, $3, $4)',
+      [userId, amount, walletAddress, 'pending']
     );
-
-    await connection.execute(
-      'INSERT INTO transactions (user_id, type, amount, description, reference_id) VALUES (?, ?, ?, ?, ?)',
-      [userId, 'withdrawal', amount, `Withdrawal request #${result.insertId}`, result.insertId]
-    );
-
-    await connection.commit();
 
     res.status(201).json({ message: 'Withdrawal request submitted', withdrawalId: result.insertId });
   } catch (error) {
-    await connection.rollback();
     console.error(error);
     res.status(500).json({ message: 'Server error' });
-  } finally {
-    connection.release();
   }
 };
 
 export const getMyWithdrawals = async (req, res) => {
   try {
     const withdrawals = await query(
-      'SELECT * FROM withdrawals WHERE user_id = ? ORDER BY created_at DESC',
+      'SELECT * FROM withdrawals WHERE user_id = $1 ORDER BY created_at DESC',
       [req.user.id]
     );
     res.json(withdrawals);
@@ -62,46 +47,33 @@ export const getMyWithdrawals = async (req, res) => {
 };
 
 export const approveWithdrawal = async (req, res) => {
-  const connection = await getConnection();
   try {
-    await connection.beginTransaction();
-
     const { id } = req.params;
     const { status, transactionHash } = req.body;
 
-    const [withdrawals] = await connection.execute('SELECT * FROM withdrawals WHERE id = ?', [id]);
-    if (!withdrawals[0].length) {
-      await connection.rollback();
+    const withdrawals = await query('SELECT * FROM withdrawals WHERE id = $1', [id]);
+    if (!withdrawals.length) {
       return res.status(404).json({ message: 'Withdrawal not found' });
     }
 
-    const withdrawal = withdrawals[0][0];
+    const withdrawal = withdrawals[0];
 
     if (status === 'rejected') {
-      await connection.execute(
-        'UPDATE users SET balance = balance + ? WHERE id = ?',
+      await query(
+        'UPDATE users SET balance = balance + $1 WHERE id = $2',
         [withdrawal.amount, withdrawal.user_id]
       );
     }
 
-    await connection.execute(
-      'UPDATE withdrawals SET status = ?, transaction_hash = ? WHERE id = ?',
+    await query(
+      'UPDATE withdrawals SET status = $1, transaction_hash = $2 WHERE id = $3',
       [status, transactionHash || null, id]
     );
 
-    await connection.execute(
-      'UPDATE transactions SET status = ? WHERE reference_id = ? AND type = ?',
-      [status === 'approved' ? 'completed' : 'failed', id, 'withdrawal']
-    );
-
-    await connection.commit();
     res.json({ message: `Withdrawal ${status}` });
   } catch (error) {
-    await connection.rollback();
     console.error(error);
     res.status(500).json({ message: 'Server error' });
-  } finally {
-    connection.release();
   }
 };
 

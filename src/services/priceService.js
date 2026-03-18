@@ -88,14 +88,14 @@ async function updatePricesInDB(prices) {
     for (const [symbol, data] of Object.entries(prices)) {
       await query(`
         INSERT INTO market_prices (symbol, name, current_price, change_24h, change_percent_24h, is_tradable, last_updated)
-        VALUES (?, ?, ?, ?, ?, true, NOW())
-        ON DUPLICATE KEY UPDATE 
-          previous_price = current_price,
-          current_price = ?,
-          change_24h = ?,
-          change_percent_24h = ?,
+        VALUES ($1, $2, $3, $4, $5, true, NOW())
+        ON CONFLICT (symbol) DO UPDATE SET
+          previous_price = market_prices.current_price,
+          current_price = $3,
+          change_24h = $4,
+          change_percent_24h = $5,
           last_updated = NOW()
-      `, [symbol, data.name, data.price, data.change, data.changePercent, data.price, data.change, data.changePercent]);
+      `, [symbol, data.name, data.price, data.change, data.changePercent]);
     }
   } catch (error) {
     console.error('Error updating prices in DB:', error.message);
@@ -110,8 +110,8 @@ async function loadPricesFromDB() {
         symbol: row.symbol,
         name: row.name,
         price: Number(row.current_price),
-        change: Number(row.change_24h),
-        changePercent: Number(row.change_percent_24h),
+        change: Number(row.change_24h || 0),
+        changePercent: Number(row.change_percent_24h || 0),
         high: Number(row.current_price) * 1.01,
         low: Number(row.current_price) * 0.99,
         volume: 0

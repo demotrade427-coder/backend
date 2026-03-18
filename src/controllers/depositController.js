@@ -1,32 +1,19 @@
-import { query, getConnection } from '../config/database.js';
+import { query } from '../config/database.js';
 
 export const createDeposit = async (req, res) => {
-  const connection = await getConnection();
   try {
-    await connection.beginTransaction();
-
     const { amount, paymentMethod, transactionHash } = req.body;
     const userId = req.user.id;
 
-    const [result] = await connection.execute(
-      'INSERT INTO deposits (user_id, amount, payment_method, transaction_hash) VALUES (?, ?, ?, ?)',
-      [userId, amount, paymentMethod, transactionHash || null]
+    const result = await query(
+      'INSERT INTO deposits (user_id, amount, payment_method, transaction_hash, status) VALUES ($1, $2, $3, $4, $5)',
+      [userId, amount, paymentMethod, transactionHash || null, 'pending']
     );
-
-    await connection.execute(
-      'INSERT INTO transactions (user_id, type, amount, description, reference_id) VALUES (?, ?, ?, ?, ?)',
-      [userId, 'deposit', amount, `Deposit request #${result.insertId}`, result.insertId]
-    );
-
-    await connection.commit();
 
     res.status(201).json({ message: 'Deposit request submitted', depositId: result.insertId });
   } catch (error) {
-    await connection.rollback();
     console.error(error);
     res.status(500).json({ message: 'Server error' });
-  } finally {
-    connection.release();
   }
 };
 
@@ -44,48 +31,30 @@ export const getMyDeposits = async (req, res) => {
 };
 
 export const approveDeposit = async (req, res) => {
-  const connection = await getConnection();
   try {
-    await connection.beginTransaction();
-
     const { id } = req.params;
     const { status } = req.body;
 
-    const [deposits] = await connection.execute('SELECT * FROM deposits WHERE id = ?', [id]);
-    if (!deposits[0].length) {
-      await connection.rollback();
+    const deposits = await query('SELECT * FROM deposits WHERE id = $1', [id]);
+    if (!deposits.length) {
       return res.status(404).json({ message: 'Deposit not found' });
     }
 
-    const deposit = deposits[0][0];
+    const deposit = deposits[0];
 
-    await connection.execute('UPDATE deposits SET status = ? WHERE id = ?', [status, id]);
+    await query('UPDATE deposits SET status = $1 WHERE id = $2', [status, id]);
 
     if (status === 'approved') {
-      await connection.execute(
-        'UPDATE users SET balance = balance + ? WHERE id = ?',
+      await query(
+        'UPDATE users SET balance = balance + $1, total_deposited = total_deposited + $1 WHERE id = $2',
         [deposit.amount, deposit.user_id]
-      );
-
-      await connection.execute(
-        'UPDATE transactions SET status = ? WHERE reference_id = ? AND type = ?',
-        ['completed', id, 'deposit']
-      );
-    } else {
-      await connection.execute(
-        'UPDATE transactions SET status = ? WHERE reference_id = ? AND type = ?',
-        ['failed', id, 'deposit']
       );
     }
 
-    await connection.commit();
     res.json({ message: `Deposit ${status}` });
   } catch (error) {
-    await connection.rollback();
     console.error(error);
     res.status(500).json({ message: 'Server error' });
-  } finally {
-    connection.release();
   }
 };
 
