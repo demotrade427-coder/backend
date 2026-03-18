@@ -55,7 +55,7 @@ export const login = async (req, res) => {
     }
 
     const user = users[0];
-    if (!user.is_active) {
+    if (user.is_active === false) {
       return res.status(401).json({ message: 'Account is disabled' });
     }
 

@@ -43,7 +43,8 @@ export async function fetchRealTimePrices() {
           const currentPrice = parseFloat(ticker.lastPrice);
           const prevPrice = parseFloat(ticker.prevClosePrice);
           const change = currentPrice - prevPrice;
-          const changePercent = ((change / prevPrice) * 100);
+          let changePercent = prevPrice !== 0 ? ((change / prevPrice) * 100) : 0;
+          if (!isFinite(changePercent)) changePercent = 0;
 
           cachedPrices[crypto.symbol] = {
             symbol: crypto.symbol,

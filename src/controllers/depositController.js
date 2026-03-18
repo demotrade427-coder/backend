@@ -2,12 +2,12 @@ import { query } from '../config/database.js';
 
 export const createDeposit = async (req, res) => {
   try {
-    const { amount, paymentMethod, transactionHash } = req.body;
+    const { amount, paymentMethod, transactionId } = req.body;
     const userId = req.user.id;
 
     const result = await query(
-      'INSERT INTO deposits (user_id, amount, payment_method, transaction_hash, status) VALUES ($1, $2, $3, $4, $5)',
-      [userId, amount, paymentMethod, transactionHash || null, 'pending']
+      'INSERT INTO deposits (user_id, amount, payment_method, transaction_id, status) VALUES ($1, $2, $3, $4, $5)',
+      [userId, amount, paymentMethod, transactionId || null, 'pending']
     );
 
     res.status(201).json({ message: 'Deposit request submitted', depositId: result.insertId });
