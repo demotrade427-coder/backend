@@ -54,6 +54,16 @@ const startServer = async () => {
   await initializeDatabase();
   startPriceUpdates(5000);
   startTradeSettlement(5000);
+  
+  const selfPing = () => {
+    const url = process.env.SELF_URL || `http://localhost:${PORT}`;
+    fetch(`${url}/api/health`)
+      .then(() => console.log('Self-ping successful'))
+      .catch(() => {});
+  };
+  
+  setInterval(selfPing, 10 * 60 * 1000);
+  
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
