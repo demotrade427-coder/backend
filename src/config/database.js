@@ -31,12 +31,12 @@ const formatPg = (sql, params) => {
 
 export const query = async (sql, params = []) => {
   try {
-    const isPg = pool.options.connectionString || !sql.includes('?');
+    const isPg = !!pool.options.connectionString;
     
     let finalSql = sql;
     let finalParams = params;
     
-    if (!isPg && sql.includes('?')) {
+    if (isPg && sql.includes('?')) {
       const formatted = formatPg(sql, params);
       finalSql = formatted.text;
       finalParams = formatted.values;
