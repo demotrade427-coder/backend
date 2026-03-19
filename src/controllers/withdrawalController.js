@@ -5,10 +5,10 @@ export const createWithdrawal = async (req, res) => {
     const { amount, walletAddress } = req.body;
     const userId = req.user.id;
 
-    const users = await query('SELECT balance FROM users WHERE id = $1', [userId]);
+    const users = await query('SELECT balance FROM users WHERE id = ?', [userId]);
     const user = users[0];
 
-    if (user.balance < amount) {
+    if (!user || user.balance < amount) {
       return res.status(400).json({ message: 'Insufficient balance' });
     }
 
@@ -17,12 +17,12 @@ export const createWithdrawal = async (req, res) => {
     }
 
     await query(
-      'UPDATE users SET balance = balance - $1 WHERE id = $2',
+      'UPDATE users SET balance = balance - ? WHERE id = ?',
       [amount, userId]
     );
 
     const result = await query(
-      'INSERT INTO withdrawals (user_id, amount, wallet_address, status) VALUES ($1, $2, $3, $4)',
+      'INSERT INTO withdrawals (user_id, amount, wallet_address, status) VALUES (?, ?, ?, ?)',
       [userId, amount, walletAddress, 'pending']
     );
 
@@ -36,10 +36,10 @@ export const createWithdrawal = async (req, res) => {
 export const getMyWithdrawals = async (req, res) => {
   try {
     const withdrawals = await query(
-      'SELECT * FROM withdrawals WHERE user_id = $1 ORDER BY created_at DESC',
+      'SELECT * FROM withdrawals WHERE user_id = ? ORDER BY created_at DESC',
       [req.user.id]
     );
-    res.json(withdrawals);
+    res.json(withdrawals || []);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -51,7 +51,7 @@ export const approveWithdrawal = async (req, res) => {
     const { id } = req.params;
     const { status, transactionHash } = req.body;
 
-    const withdrawals = await query('SELECT * FROM withdrawals WHERE id = $1', [id]);
+    const withdrawals = await query('SELECT * FROM withdrawals WHERE id = ?', [id]);
     if (!withdrawals.length) {
       return res.status(404).json({ message: 'Withdrawal not found' });
     }
@@ -60,13 +60,13 @@ export const approveWithdrawal = async (req, res) => {
 
     if (status === 'rejected') {
       await query(
-        'UPDATE users SET balance = balance + $1 WHERE id = $2',
+        'UPDATE users SET balance = balance + ? WHERE id = ?',
         [withdrawal.amount, withdrawal.user_id]
       );
     }
 
     await query(
-      'UPDATE withdrawals SET status = $1, transaction_hash = $2 WHERE id = $3',
+      'UPDATE withdrawals SET status = ?, transaction_hash = ? WHERE id = ?',
       [status, transactionHash || null, id]
     );
 
@@ -85,7 +85,7 @@ export const getAllWithdrawalsAdmin = async (req, res) => {
        JOIN users u ON w.user_id = u.id
        ORDER BY w.created_at DESC`
     );
-    res.json(withdrawals);
+    res.json(withdrawals || []);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -97,11 +97,11 @@ export const getWithdrawalStats = async (req, res) => {
     const stats = await query(
       `SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) as total_approved,
-        SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) as total_pending
+        COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) as total_approved,
+        COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as total_pending
       FROM withdrawals`
     );
-    res.json(stats[0]);
+    res.json(stats[0] || { total: 0, total_approved: 0, total_pending: 0 });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });

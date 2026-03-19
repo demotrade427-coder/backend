@@ -14,30 +14,31 @@ export const getAllLoans = async (req, res) => {
     const params = [];
 
     if (status) {
-      sql += ` WHERE l.status = $1`;
+      sql += ` WHERE l.status = ?`;
       params.push(status);
     }
 
-    sql += ` ORDER BY l.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+    sql += ` ORDER BY l.created_at DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
     const loans = await query(sql, params);
 
-    let countSql = `SELECT COUNT(*) FROM loans`;
+    let countSql = `SELECT COUNT(*) as count FROM loans`;
     const countParams = [];
     if (status) {
-      countSql += ` WHERE status = $1`;
+      countSql += ` WHERE status = ?`;
       countParams.push(status);
     }
     const countResult = await query(countSql, countParams);
 
     res.json({
       loans,
-      total: parseInt(countResult[0].count),
+      total: parseInt(countResult[0]?.count || 0),
       page: parseInt(page),
-      totalPages: Math.ceil(countResult[0].count / limit)
+      totalPages: Math.ceil((countResult[0]?.count || 0) / limit)
     });
   } catch (error) {
+    console.error('getAllLoans error:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -52,7 +53,7 @@ export const getLoanDetails = async (req, res) => {
       FROM loans l
       LEFT JOIN users u ON l.user_id = u.id
       LEFT JOIN admin_users a ON l.approved_by = a.id
-      WHERE l.id = $1
+      WHERE l.id = ?
     `, [id]);
 
     if (loans.length === 0) {
@@ -61,6 +62,7 @@ export const getLoanDetails = async (req, res) => {
 
     res.json(loans[0]);
   } catch (error) {
+    console.error('getLoanDetails error:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -71,7 +73,7 @@ export const approveLoan = async (req, res) => {
     const adminId = req.admin.id;
     const { notes } = req.body;
 
-    const loans = await query(`SELECT * FROM loans WHERE id = $1 AND status = 'pending'`, [id]);
+    const loans = await query(`SELECT * FROM loans WHERE id = ? AND status = 'pending'`, [id]);
 
     if (loans.length === 0) {
       return res.status(404).json({ error: 'Pending loan not found' });
@@ -81,23 +83,23 @@ export const approveLoan = async (req, res) => {
 
     await query(`
       UPDATE loans 
-      SET status = 'approved', approved_by = $1, approved_at = NOW(), notes = $2, updated_at = NOW()
-      WHERE id = $3
+      SET status = 'approved', approved_by = ?, approved_at = NOW(), notes = ?, updated_at = NOW()
+      WHERE id = ?
     `, [adminId, notes || null, id]);
 
     await query(`
-      UPDATE users SET balance = balance + $1, updated_at = NOW() WHERE id = $2
+      UPDATE users SET balance = balance + ?, updated_at = NOW() WHERE id = ?
     `, [loan.amount, loan.user_id]);
 
     await query(`
       INSERT INTO transactions (user_id, type, amount, balance_before, balance_after, status, description)
-      SELECT $1, 'loan_disbursement', $2, u.balance - $2, u.balance, 'completed', $3
-      FROM users u WHERE u.id = $1
-    `, [loan.user_id, loan.amount, `Loan disbursement for Loan #${id}`]);
+      SELECT ?, 'loan_disbursement', ?, u.balance - ?, u.balance, 'completed', ?
+      FROM users u WHERE u.id = ?
+    `, [loan.user_id, loan.amount, loan.amount, `Loan disbursement for Loan #${id}`, loan.user_id]);
 
     await query(`
       INSERT INTO notifications (user_id, title, message, type)
-      VALUES ($1, 'Loan Approved', $2, 'success')
+      VALUES (?, 'Loan Approved', ?, 'success')
     `, [loan.user_id, `Your loan of $${loan.amount} has been approved and added to your balance.`]);
 
     res.json({
@@ -120,7 +122,7 @@ export const rejectLoan = async (req, res) => {
       return res.status(400).json({ error: 'Rejection reason is required' });
     }
 
-    const loans = await query(`SELECT * FROM loans WHERE id = $1 AND status = 'pending'`, [id]);
+    const loans = await query(`SELECT * FROM loans WHERE id = ? AND status = 'pending'`, [id]);
 
     if (loans.length === 0) {
       return res.status(404).json({ error: 'Pending loan not found' });
@@ -130,13 +132,13 @@ export const rejectLoan = async (req, res) => {
 
     await query(`
       UPDATE loans 
-      SET status = 'rejected', rejection_reason = $1, updated_at = NOW()
-      WHERE id = $2
+      SET status = 'rejected', rejection_reason = ?, updated_at = NOW()
+      WHERE id = ?
     `, [reason, id]);
 
     await query(`
       INSERT INTO notifications (user_id, title, message, type)
-      VALUES ($1, 'Loan Rejected', $2, 'error')
+      VALUES (?, 'Loan Rejected', ?, 'error')
     `, [loan.user_id, `Your loan application of $${loan.amount} has been rejected. Reason: ${reason}`]);
 
     res.json({
@@ -144,6 +146,7 @@ export const rejectLoan = async (req, res) => {
       loanId: id
     });
   } catch (error) {
+    console.error('rejectLoan error:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -165,17 +168,18 @@ export const getLoanStats = async (req, res) => {
     `);
 
     res.json({
-      totalLoans: parseInt(stats[0].total_loans),
-      pendingLoans: parseInt(stats[0].pending_loans),
-      activeLoans: parseInt(stats[0].active_loans),
-      completedLoans: parseInt(stats[0].completed_loans),
-      rejectedLoans: parseInt(stats[0].rejected_loans),
-      pendingAmount: parseFloat(stats[0].pending_amount),
-      disbursedAmount: parseFloat(stats[0].disbursed_amount),
-      totalRepaid: parseFloat(stats[0].total_repaid),
-      avgInterestRate: parseFloat(stats[0].avg_interest_rate)
+      totalLoans: parseInt(stats[0]?.total_loans || 0),
+      pendingLoans: parseInt(stats[0]?.pending_loans || 0),
+      activeLoans: parseInt(stats[0]?.active_loans || 0),
+      completedLoans: parseInt(stats[0]?.completed_loans || 0),
+      rejectedLoans: parseInt(stats[0]?.rejected_loans || 0),
+      pendingAmount: parseFloat(stats[0]?.pending_amount || 0),
+      disbursedAmount: parseFloat(stats[0]?.disbursed_amount || 0),
+      totalRepaid: parseFloat(stats[0]?.total_repaid || 0),
+      avgInterestRate: parseFloat(stats[0]?.avg_interest_rate || 0)
     });
   } catch (error) {
+    console.error('getLoanStats error:', error);
     res.status(500).json({ error: error.message });
   }
 };

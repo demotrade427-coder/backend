@@ -34,8 +34,10 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    console.log('Login attempt:', email);
 
     if (email === process.env.ADMIN_EMAIL && password === process.env.ADMIN_PASSWORD) {
+      console.log('Admin login match');
       const token = jwt.sign({ id: 1, role: 'super_admin' }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
       return res.json({
         token,
@@ -49,17 +51,25 @@ export const login = async (req, res) => {
       });
     }
 
+    console.log('Checking user in database...');
     const users = await query('SELECT * FROM users WHERE email = ?', [email]);
+    console.log('Users found:', users.length);
+    
     if (!users.length) {
+      console.log('User not found');
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
     const user = users[0];
+    console.log('User found:', user.email);
+    
     if (user.is_active === false) {
       return res.status(401).json({ message: 'Account is disabled' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
+    console.log('Password match:', isMatch);
+    
     if (!isMatch) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -80,7 +90,7 @@ export const login = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error(error);
+    console.error('Login error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -114,7 +124,7 @@ export const getMe = async (req, res) => {
   try {
     const userId = req.user?.id || req.user.id;
     const users = await query(
-      'SELECT id, first_name, last_name, email, phone, country, balance, total_deposited, total_withdrawn, total_traded, total_profit, kyc_status, created_at FROM users WHERE id = $1',
+      'SELECT id, first_name, last_name, email, phone, country, balance, total_deposited, total_withdrawn, total_traded, total_profit, kyc_status, created_at FROM users WHERE id = ?',
       [userId]
     );
 

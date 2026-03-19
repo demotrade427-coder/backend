@@ -1,6 +1,4 @@
 import { query } from '../config/database.js';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 
 const LOAN_TERMS = [
   { duration: 7, interestRate: 5, label: '7 Days - 5%' },
@@ -41,13 +39,13 @@ export const applyForLoan = async (req, res) => {
 
     const result = await query(
       `INSERT INTO loans (user_id, amount, interest_rate, duration_days, collateral_amount, collateral_type, repayment_amount, status)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') RETURNING id`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')`,
       [userId, amount, interestRate, duration_days, collateral_amount || null, collateral_type || null, repaymentAmount]
     );
 
     res.status(201).json({
       message: 'Loan application submitted successfully',
-      loanId: result.insertId || result.rows[0]?.id,
+      loanId: result.insertId || result.rows?.[0]?.id,
       details: {
         amount,
         interestRate,
@@ -66,11 +64,11 @@ export const getMyLoans = async (req, res) => {
     const userId = req.user.id;
     const { status } = req.query;
 
-    let sql = `SELECT * FROM loans WHERE user_id = $1`;
+    let sql = `SELECT * FROM loans WHERE user_id = ?`;
     const params = [userId];
 
     if (status) {
-      sql += ` AND status = $2`;
+      sql += ` AND status = ?`;
       params.push(status);
     }
 
@@ -78,8 +76,9 @@ export const getMyLoans = async (req, res) => {
 
     const loans = await query(sql, params);
 
-    res.json(loans);
+    res.json(loans || []);
   } catch (error) {
+    console.error('getMyLoans error:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -90,7 +89,7 @@ export const getLoanDetails = async (req, res) => {
     const { id } = req.params;
 
     const loans = await query(
-      `SELECT * FROM loans WHERE id = $1 AND user_id = $2`,
+      `SELECT * FROM loans WHERE id = ? AND user_id = ?`,
       [id, userId]
     );
 
@@ -100,6 +99,7 @@ export const getLoanDetails = async (req, res) => {
 
     res.json(loans[0]);
   } catch (error) {
+    console.error('getLoanDetails error:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -110,7 +110,7 @@ export const repayLoan = async (req, res) => {
     const { id } = req.params;
 
     const loans = await query(
-      `SELECT * FROM loans WHERE id = $1 AND user_id = $2`,
+      `SELECT * FROM loans WHERE id = ? AND user_id = ?`,
       [id, userId]
     );
 
@@ -129,29 +129,29 @@ export const repayLoan = async (req, res) => {
     }
 
     const userBalance = await query(
-      `SELECT balance FROM users WHERE id = $1`,
+      `SELECT balance FROM users WHERE id = ?`,
       [userId]
     );
 
-    if (userBalance[0].balance < loan.repayment_amount) {
+    if (!userBalance[0] || userBalance[0].balance < loan.repayment_amount) {
       return res.status(400).json({ error: 'Insufficient balance for repayment' });
     }
 
     const newBalance = parseFloat(userBalance[0].balance) - parseFloat(loan.repayment_amount);
 
     await query(
-      `UPDATE users SET balance = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE users SET balance = ?, updated_at = NOW() WHERE id = ?`,
       [newBalance, userId]
     );
 
     await query(
-      `UPDATE loans SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      `UPDATE loans SET status = 'completed', completed_at = NOW(), updated_at = NOW() WHERE id = ?`,
       [id]
     );
 
     await query(
       `INSERT INTO transactions (user_id, type, amount, balance_before, balance_after, status, description)
-       VALUES ($1, 'loan_repayment', $2, $3, $4, 'completed', $5)`,
+       VALUES (?, 'loan_repayment', ?, ?, ?, 'completed', ?)`,
       [userId, loan.repayment_amount, userBalance[0].balance, newBalance, `Loan repayment for Loan #${id}`]
     );
 
@@ -177,18 +177,19 @@ export const getActiveLoanStats = async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'completed') as completed_count,
         COALESCE(SUM(amount) FILTER (WHERE status = 'approved'), 0) as active_amount,
         COALESCE(SUM(repayment_amount) FILTER (WHERE status = 'approved'), 0) as pending_repayment
-       FROM loans WHERE user_id = $1`,
+       FROM loans WHERE user_id = ?`,
       [userId]
     );
 
     res.json({
-      pendingLoans: parseInt(stats[0].pending_count),
-      activeLoans: parseInt(stats[0].active_count),
-      completedLoans: parseInt(stats[0].completed_count),
-      activeAmount: parseFloat(stats[0].active_amount),
-      pendingRepayment: parseFloat(stats[0].pending_repayment)
+      pendingLoans: parseInt(stats[0]?.pending_count || 0),
+      activeLoans: parseInt(stats[0]?.active_count || 0),
+      completedLoans: parseInt(stats[0]?.completed_count || 0),
+      activeAmount: parseFloat(stats[0]?.active_amount || 0),
+      pendingRepayment: parseFloat(stats[0]?.pending_repayment || 0)
     });
   } catch (error) {
+    console.error('getActiveLoanStats error:', error);
     res.status(500).json({ error: error.message });
   }
 };

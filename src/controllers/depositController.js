@@ -6,7 +6,7 @@ export const createDeposit = async (req, res) => {
     const userId = req.user.id;
 
     const result = await query(
-      'INSERT INTO deposits (user_id, amount, payment_method, transaction_id, status) VALUES ($1, $2, $3, $4, $5)',
+      'INSERT INTO deposits (user_id, amount, payment_method, transaction_id, status) VALUES (?, ?, ?, ?, ?)',
       [userId, amount, paymentMethod, transactionId || null, 'pending']
     );
 
@@ -35,19 +35,19 @@ export const approveDeposit = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    const deposits = await query('SELECT * FROM deposits WHERE id = $1', [id]);
+    const deposits = await query('SELECT * FROM deposits WHERE id = ?', [id]);
     if (!deposits.length) {
       return res.status(404).json({ message: 'Deposit not found' });
     }
 
     const deposit = deposits[0];
 
-    await query('UPDATE deposits SET status = $1 WHERE id = $2', [status, id]);
+    await query('UPDATE deposits SET status = ? WHERE id = ?', [status, id]);
 
     if (status === 'approved') {
       await query(
-        'UPDATE users SET balance = balance + $1, total_deposited = total_deposited + $1 WHERE id = $2',
-        [deposit.amount, deposit.user_id]
+        'UPDATE users SET balance = balance + ?, total_deposited = total_deposited + ? WHERE id = ?',
+        [deposit.amount, deposit.amount, deposit.user_id]
       );
     }
 
@@ -78,11 +78,11 @@ export const getDepositStats = async (req, res) => {
     const stats = await query(
       `SELECT 
         COUNT(*) as total,
-        SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) as total_approved,
-        SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) as total_pending
+        COALESCE(SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END), 0) as total_approved,
+        COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as total_pending
       FROM deposits`
     );
-    res.json(stats[0]);
+    res.json(stats[0] || { total: 0, total_approved: 0, total_pending: 0 });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });

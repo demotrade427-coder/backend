@@ -623,8 +623,8 @@ router.post('/markets', verifyAdmin, async (req, res) => {
     const { symbol, name, current_price, trade_duration_seconds, payout_rate, is_tradable } = req.body;
     
     const result = await query(
-      `INSERT INTO market_prices (symbol, name, current_price, trade_duration_seconds, payout_rate, is_tradable) VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (symbol) DO UPDATE SET name = $2, current_price = $3, trade_duration_seconds = $4, payout_rate = $5, is_tradable = $6`,
+      `INSERT INTO market_prices (symbol, name, current_price, trade_duration_seconds, payout_rate, is_tradable) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (symbol) DO UPDATE SET name = EXCLUDED.name, current_price = EXCLUDED.current_price, trade_duration_seconds = EXCLUDED.trade_duration_seconds, payout_rate = EXCLUDED.payout_rate, is_tradable = EXCLUDED.is_tradable`,
       [symbol, name, current_price, trade_duration_seconds || 60, payout_rate || 85, is_tradable !== false]
     );
     

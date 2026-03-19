@@ -1,9 +1,77 @@
 import express from 'express';
+import axios from 'axios';
 import { query, getConnection } from '../config/database.js';
 import { verifyUser } from '../middleware/auth.js';
 import { getPrice, getAllPrices } from '../services/priceService.js';
 
 const router = express.Router();
+
+const BINANCE_API = 'https://api.binance.com/api/v3';
+
+router.get('/binance/klines', async (req, res) => {
+  try {
+    const { symbol = 'BTCUSDT', interval = '1m', limit = 500 } = req.query;
+    
+    const response = await axios.get(`${BINANCE_API}/klines`, {
+      params: { symbol, interval, limit },
+      timeout: 10000
+    });
+    
+    res.json(response.data);
+  } catch (error) {
+    console.error('Binance klines error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch klines from Binance' });
+  }
+});
+
+router.get('/binance/ticker', async (req, res) => {
+  try {
+    const { symbol = 'BTCUSDT' } = req.query;
+    
+    const response = await axios.get(`${BINANCE_API}/ticker/24hr`, {
+      params: { symbol },
+      timeout: 10000
+    });
+    
+    res.json(response.data);
+  } catch (error) {
+    console.error('Binance ticker error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch ticker from Binance' });
+  }
+});
+
+router.get('/binance/tickers', async (req, res) => {
+  try {
+    const response = await axios.get(`${BINANCE_API}/ticker/24hr`, {
+      timeout: 10000
+    });
+    
+    const tickers = response.data
+      .filter(t => t.symbol.endsWith('USDT'))
+      .slice(0, 50)
+      .map(t => ({
+        symbol: t.symbol,
+        price: parseFloat(t.lastPrice),
+        change: parseFloat(t.priceChangePercent),
+        high: parseFloat(t.highPrice),
+        low: parseFloat(t.lowPrice),
+        volume: parseFloat(t.quoteVolume)
+      }));
+    
+    res.json(tickers);
+  } catch (error) {
+    console.error('Binance tickers error:', error.message);
+    res.status(500).json({ error: 'Failed to fetch tickers from Binance' });
+  }
+});
+
+router.get('/binance/websocket-url', (req, res) => {
+  const { streams = 'btcusdt@ticker' } = req.query;
+  res.json({
+    url: `wss://stream.binance.com:9443/stream?streams=${streams}`,
+    streams: streams.split(',')
+  });
+});
 
 router.get('/coins', verifyUser, async (req, res) => {
   try {
@@ -11,6 +79,7 @@ router.get('/coins', verifyUser, async (req, res) => {
     const markets = Object.values(prices);
     res.json(markets);
   } catch (error) {
+    console.error('coins error:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -201,7 +270,7 @@ router.get('/my-trades/open', verifyUser, async (req, res) => {
     const trades = await query(`
       SELECT t.*, t.coin_name as coin_name, t.coin_symbol
       FROM trades t
-      WHERE t.user_id = $1 AND t.result = 'pending'
+      WHERE t.user_id = ? AND t.result = 'pending'
       ORDER BY t.created_at DESC
     `, [req.user.id]);
     
@@ -222,7 +291,7 @@ router.get('/my-trades/history', verifyUser, async (req, res) => {
     const trades = await query(`
       SELECT t.*, t.coin_name as coin_name, t.coin_symbol
       FROM trades t
-      WHERE t.user_id = $1 AND t.result != 'pending'
+      WHERE t.user_id = ? AND t.result != 'pending'
       ORDER BY t.created_at DESC
     `, [req.user.id]);
     
