@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { createServer } from 'http';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 import authRoutes from './routes/authRoutes.js';
 import planRoutes from './routes/planRoutes.js';
@@ -9,16 +12,24 @@ import depositRoutes from './routes/depositRoutes.js';
 import withdrawalRoutes from './routes/withdrawalRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import adminLoanRoutes from './routes/adminLoanRoutes.js';
 import tradingRoutes from './routes/tradingRoutes.js';
+import loanRoutes from './routes/loanRoutes.js';
 import { initializeDatabase } from './config/database.js';
 import { startPriceUpdates, getAllPrices } from './services/priceService.js';
 import { startTradeSettlement } from './services/tradeSettlement.js';
-import { authenticate } from './middleware/auth.js';
+import { initSocket } from './services/socketService.js';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const app = express();
 const PORT = process.env.PORT || 5000;
+const httpServer = createServer(app);
+
+initSocket(httpServer);
 
 app.use(cors());
 app.use(express.json());
@@ -31,7 +42,9 @@ app.use('/api/deposits', depositRoutes);
 app.use('/api/withdrawals', withdrawalRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/loans', adminLoanRoutes);
 app.use('/api/trading', tradingRoutes);
+app.use('/api/loans', loanRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Trading Platform API is running' });
@@ -65,8 +78,9 @@ const startServer = async () => {
   
   setInterval(selfPing, 10 * 60 * 1000);
   
-  app.listen(PORT, () => {
+  httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
+    console.log(`WebSocket server ready`);
   });
 };
 

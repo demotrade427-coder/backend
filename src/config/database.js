@@ -326,6 +326,27 @@ export const initializeDatabase = async () => {
       )
     `).catch(() => {});
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS loans (
+        id SERIAL PRIMARY KEY,
+        user_id INT NOT NULL REFERENCES users(id),
+        amount DECIMAL(15, 2) NOT NULL,
+        interest_rate DECIMAL(5, 2) NOT NULL,
+        duration_days INT NOT NULL,
+        collateral_amount DECIMAL(15, 2),
+        collateral_type VARCHAR(50),
+        status VARCHAR(20) DEFAULT 'pending',
+        repayment_amount DECIMAL(15, 2),
+        approved_by INT REFERENCES admin_users(id),
+        approved_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        rejection_reason TEXT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `).catch(() => {});
+
     const adminExists = await pool.query("SELECT id FROM admin_users WHERE username = 'admin'");
     if (adminExists.rows.length === 0) {
       await pool.query(`
