@@ -90,6 +90,7 @@ export const initializeDatabase = async () => {
         total_deposited DECIMAL(15, 2) DEFAULT 0.00,
         total_withdrawn DECIMAL(15, 2) DEFAULT 0.00,
         total_traded DECIMAL(15, 2) DEFAULT 0.00,
+        total_invested DECIMAL(15, 2) DEFAULT 0.00,
         total_profit DECIMAL(15, 2) DEFAULT 0.00,
         agent_id INT NULL,
         kyc_status VARCHAR(20) DEFAULT 'pending',
@@ -101,6 +102,8 @@ export const initializeDatabase = async () => {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `).catch(() => {});
+
+    await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS total_invested DECIMAL(15, 2) DEFAULT 0.00`).catch(() => {});
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS trades (
@@ -200,7 +203,7 @@ export const initializeDatabase = async () => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS plans (
         id SERIAL PRIMARY KEY,
-        name VARCHAR(100) NOT NULL,
+        name VARCHAR(100) NOT NULL UNIQUE,
         description TEXT,
         min_amount DECIMAL(15, 2) NOT NULL,
         max_amount DECIMAL(15, 2) NOT NULL,
@@ -210,6 +213,8 @@ export const initializeDatabase = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     `).catch(() => {});
+
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_name ON plans(name)`).catch(() => {});
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS investments (
@@ -393,11 +398,21 @@ export const initializeDatabase = async () => {
       { name: 'Premium', description: 'Maximum returns for serious investors', min_amount: 5000, max_amount: 50000, roi_percentage: 20, duration_days: 30 }
     ];
 
+    await pool.query(`
+      DELETE FROM plans a USING plans b
+      WHERE a.id > b.id AND a.name = b.name
+    `).catch(() => {});
+
     for (const plan of defaultPlans) {
       await pool.query(`
         INSERT INTO plans (name, description, min_amount, max_amount, roi_percentage, duration_days, is_active)
         VALUES ($1, $2, $3, $4, $5, $6, true)
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (name) DO UPDATE SET
+          description = EXCLUDED.description,
+          min_amount = EXCLUDED.min_amount,
+          max_amount = EXCLUDED.max_amount,
+          roi_percentage = EXCLUDED.roi_percentage,
+          duration_days = EXCLUDED.duration_days
       `, [plan.name, plan.description, plan.min_amount, plan.max_amount, plan.roi_percentage, plan.duration_days]).catch(() => {});
     }
 
