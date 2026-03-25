@@ -411,35 +411,33 @@ router.post('/trades/:id/result', verifyAdmin, async (req, res) => {
       return res.status(404).json({ error: 'Trade not found' });
     }
 
-    if (trade[0].result !== 'pending') {
-      return res.status(400).json({ error: 'Trade result already set' });
-    }
-
-    let profitLoss = 0;
+    const oldResult = trade[0].result;
+    const oldProfitLoss = Number(trade[0].profit_loss || 0);
+    
+    let newProfitLoss = 0;
     if (result === 'win') {
-      profitLoss = Number(trade[0].amount) * 0.80;
+      newProfitLoss = Number(trade[0].amount) * 0.80;
     } else if (result === 'loss') {
-      profitLoss = -Number(trade[0].amount);
+      newProfitLoss = -Number(trade[0].amount);
     }
 
-    await query('UPDATE trades SET result = ?, profit_loss = ? WHERE id = ?', [result, profitLoss, req.params.id]);
+    await query('UPDATE trades SET result = ?, profit_loss = ? WHERE id = ?', [result, newProfitLoss, req.params.id]);
     await query('INSERT INTO manual_results (trade_id, admin_id, result, note) VALUES (?, ?, ?, ?)', 
       [req.params.id, req.admin.id, result, note]);
 
-    if (profitLoss !== 0) {
-      const user = await query('SELECT * FROM users WHERE id = ?', [trade[0].user_id]);
-      const newBalance = Number(user[0].trading_balance) + profitLoss;
-      
-      await query('UPDATE users SET trading_balance = ?, total_profit = total_profit + ? WHERE id = ?', 
-        [newBalance, profitLoss > 0 ? profitLoss : 0, trade[0].user_id]);
+    const user = await query('SELECT * FROM users WHERE id = ?', [trade[0].user_id]);
+    const balanceChange = newProfitLoss - oldProfitLoss;
+    const newBalance = Number(user[0].trading_balance) + balanceChange;
+    
+    await query('UPDATE users SET trading_balance = ?, total_profit = total_profit + ? WHERE id = ?', 
+      [newBalance, balanceChange > 0 ? balanceChange : 0, trade[0].user_id]);
 
-      await query(
-        'INSERT INTO transactions (user_id, type, amount, balance_before, balance_after, status, description, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [trade[0].user_id, result === 'win' ? 'profit' : 'loss', Math.abs(profitLoss), user[0].trading_balance, newBalance, 'completed', `Trade ${result}`, trade[0].id]
-      );
-    }
+    await query(
+      'INSERT INTO transactions (user_id, type, amount, balance_before, balance_after, status, description, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [trade[0].user_id, result === 'win' ? 'profit' : 'loss', Math.abs(newProfitLoss), user[0].trading_balance, newBalance, 'completed', `Manual ${result} (changed from ${oldResult})`, trade[0].id]
+    );
 
-    res.json({ message: `Trade marked as ${result}`, profit_loss: profitLoss });
+    res.json({ message: `Trade marked as ${result}`, profit_loss: newProfitLoss, balance_change: balanceChange });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -645,6 +643,95 @@ router.patch('/markets/:symbol', verifyAdmin, async (req, res) => {
     
     res.json({ message: 'Market updated' });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get auto-settlement settings
+router.get('/settings/auto-settlement', verifyAdmin, async (req, res) => {
+  try {
+    const settings = await query('SELECT * FROM admin_settings WHERE setting_key = ?', ['auto_settlement']);
+    res.json({ 
+      enabled: settings.length > 0 ? settings[0].setting_value === 'true' : true 
+    });
+  } catch (error) {
+    res.json({ enabled: true });
+  }
+});
+
+// Toggle auto-settlement
+router.patch('/settings/auto-settlement', verifyAdmin, async (req, res) => {
+  try {
+    const { enabled } = req.body;
+    await query(
+      `INSERT INTO admin_settings (setting_key, setting_value) VALUES ('auto_settlement', ?)
+       ON CONFLICT (setting_key) DO UPDATE SET setting_value = ?`,
+      [enabled.toString(), enabled.toString()]
+    );
+    res.json({ message: 'Auto-settlement updated', enabled });
+  } catch (error) {
+    res.json({ enabled: true });
+  }
+});
+
+// Auto-settle single trade
+router.get('/trades/:id/auto-settle', verifyAdmin, async (req, res) => {
+  try {
+    const trade = await query('SELECT * FROM trades WHERE id = ?', [req.params.id]);
+    if (trade.length === 0) {
+      return res.status(404).json({ error: 'Trade not found' });
+    }
+    if (trade[0].result !== 'pending') {
+      return res.status(400).json({ error: 'Trade already settled' });
+    }
+
+    const { getPrice } = await import('../services/priceService.js');
+    const priceData = await getPrice(trade[0].coin_symbol);
+    const exitPrice = priceData?.price || trade[0].price;
+    const entryPrice = Number(trade[0].price);
+    const payoutRate = 0.85;
+
+    let result = 'loss';
+    let profitLoss = -Number(trade[0].amount);
+
+    if (trade[0].trade_type === 'buy') {
+      if (exitPrice > entryPrice) {
+        result = 'win';
+        profitLoss = Number(trade[0].amount) * payoutRate;
+      }
+    } else if (trade[0].trade_type === 'sell') {
+      if (exitPrice < entryPrice) {
+        result = 'win';
+        profitLoss = Number(trade[0].amount) * payoutRate;
+      }
+    }
+
+    await query(
+      'UPDATE trades SET result = ?, profit_loss = ?, exit_price = ?, settled_at = NOW() WHERE id = ?',
+      [result, profitLoss, exitPrice, req.params.id]
+    );
+
+    const user = await query('SELECT * FROM users WHERE id = ?', [trade[0].user_id]);
+    const newBalance = Number(user[0].trading_balance) + profitLoss;
+
+    await query(
+      'UPDATE users SET trading_balance = ?, total_profit = total_profit + ? WHERE id = ?',
+      [newBalance, profitLoss > 0 ? profitLoss : 0, trade[0].user_id]
+    );
+
+    await query(
+      'INSERT INTO transactions (user_id, type, amount, balance_before, balance_after, status, description, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [trade[0].user_id, result === 'win' ? 'profit' : 'loss', Math.abs(profitLoss), user[0].trading_balance, newBalance, 'completed', `Auto-trade ${result}: ${trade[0].coin_symbol}`, trade[0].id]
+    );
+
+    res.json({ 
+      message: `Trade auto-settled as ${result}`, 
+      result,
+      profit_loss: profitLoss,
+      exit_price: exitPrice
+    });
+  } catch (error) {
+    console.error('Auto-settle error:', error);
     res.status(500).json({ error: error.message });
   }
 });

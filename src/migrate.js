@@ -13,6 +13,31 @@ async function migrateDatabase() {
       database: process.env.DB_NAME || 'investment_platform'
     });
 
+    // Create admin_settings table
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS admin_settings (
+          id INT PRIMARY KEY AUTO_INCREMENT,
+          setting_key VARCHAR(100) NOT NULL UNIQUE,
+          setting_value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+      `);
+      console.log('✓ Created admin_settings table');
+    } catch (e) {
+      console.log('admin_settings table:', e.message);
+    }
+
+    // Insert default settings
+    try {
+      await connection.query(`
+        INSERT IGNORE INTO admin_settings (setting_key, setting_value) VALUES ('auto_settlement', 'true')
+      `);
+      console.log('✓ Inserted default settings');
+    } catch (e) {
+      console.log('Default settings:', e.message);
+    }
+
     console.log('Checking and adding missing columns to users table...');
 
     // Add is_agent column if not exists

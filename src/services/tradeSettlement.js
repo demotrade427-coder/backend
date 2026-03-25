@@ -1,7 +1,23 @@
 import { query } from '../config/database.js';
 import { getPrice } from './priceService.js';
 
+let autoSettlementEnabled = true;
+
+export async function checkAutoSettlementSetting() {
+  try {
+    const settings = await query('SELECT setting_value FROM admin_settings WHERE setting_key = ?', ['auto_settlement']);
+    autoSettlementEnabled = settings.length === 0 || settings[0].setting_value === 'true';
+    console.log(`Auto-settlement: ${autoSettlementEnabled ? 'ENABLED' : 'DISABLED'}`);
+  } catch (error) {
+    autoSettlementEnabled = true;
+  }
+}
+
 export async function settleExpiredTrades() {
+  if (!autoSettlementEnabled) {
+    return;
+  }
+
   try {
     const now = new Date();
     
@@ -73,7 +89,9 @@ export async function settleExpiredTrades() {
 
 export function startTradeSettlement(intervalMs = 5000) {
   console.log('Starting automated trade settlement...');
+  checkAutoSettlementSetting();
   setInterval(settleExpiredTrades, intervalMs);
+  setInterval(checkAutoSettlementSetting, 30000);
 }
 
 export default {
